@@ -45,7 +45,15 @@
 - **Персист соты:** при непустом `REDIS_ADDR` cell-node сохраняет protobuf `CellPersist` в ключ `mmo:cell:{cell_id}:state` перед graceful shutdown (`-persist-snapshot`, по умолчанию вкл.) и восстанавливает при старте (игроки не в снепшоте); без Redis — как раньше.
 - **Consul:** регистрация с `bounds`, `level`, логический id в meta (`mmo_cell_id`), уникальный id инстанса на pod (`HOSTNAME`); при shutdown — `ServiceDeregister` по тому же составному id. **Без отдельного health-check:** в каталоге сервис без checks считается passing (обход проблем `UpdateTTL` на агенте в этом окружении).
 - **БД в кластере (операторы уже стоят):** **CloudNativePG**; DSN **`DATABASE_URL_RW`** в Secret **`mmo-backend`**. **Gateway / goose (staging):** DDL из Job **`/migrate`** (`goose-migrate-job`), gateway без **`RunMigrations`**. См. **`gateway_migrations.auto.tfvars`**. Таблицы: **`mmo_session_issue`**, **`mmo_player_last_cell`**, … **`mmo_item_def`** / **`mmo_player_item`**. **ScyllaDB** — клиента в MMO пока нет *(инфра `scylla` — Phase 0)*.
-- **Криптоэкономика (дизайн):** токен **BET**, NFT (soulbound / продаваемые), **burn**, газлесс‑релей, мультисиг — описаны на уровне продуктового дизайна; **смарт‑контракты, релей и on-chain синк в коде репозитория пока не реализованы**. Канон: [crypto-economy.md](crypto-economy.md).
+- **Криптоэкономика (дизайн):** токен **BET**, NFT (soulbound / продаваемые), **burn**, газлесс‑релей, мультисиг — на уровне продуктового дизайна; **whitepaper v0** — [bet-whitepaper-v0.md](bet-whitepaper-v0.md). **Смарт‑контракты, релей и on-chain синк в коде** пока не реализованы. Канон чеклистов: [crypto-economy.md](crypto-economy.md).
+
+### Следующий шаг (приоритет)
+
+Ориентир для планирования спринта (фазы **A–H** — [bet-whitepaper-v0.md](bet-whitepaper-v0.md), очередность **§2** — [crypto-economy.md](crypto-economy.md)):
+
+1. **Web3 / BET:** sign-off параметров v0 (вне репо) → выбор тестнета → **§2.1** контракты (минимум BET ERC-20) → **§2.3** индексатор → PostgreSQL/Redis → газлесс‑релей → **§2.4** безопасность → **§2.2** API/Unity. Инженерный трекер: [web3-implementation-tracker.md](web3-implementation-tracker.md).
+2. **B3 (хвосты cold-path):** при необходимости — вывод родителя из каталога ([runbook §5](../backend/runbooks/cold-cell-split.md)), операторский handoff — [cells-migration-workflow.md](../backend/docs/cells-migration-workflow.md); автоперенос сессии без реконнекта — нет (см. таблицу ниже).
+3. **Phase 0 — техдолг:** сводка открытых пунктов фундамента — [phase0-foundation-backlog.md](phase0-foundation-backlog.md).
 
 ```mermaid
 flowchart LR
@@ -61,13 +69,6 @@ flowchart LR
   cell --> consul
 ```
 
-**Следующий шаг (приоритет):** *(соты и preflight — снимок; миграция **`20260429120000`** выкатана на staging — см. ниже.)*
-
-1. **Unity / WebGL:** базовый **WebGL e2e** на staging **пройден** (2026-03-29, см. [webgl-staging-e2e.md](webgl-staging-e2e.md)); дальше — регрессия после крупных изменений клиента/gateway, при желании **prediction** (**`MmoGameBootstrap`**). WS: [`MmoWebSocket.jslib`](../Unity/Assets/Plugins/WebGL/MmoWebSocket.jslib), **`MmoWorldStreamClient`**, **`Poll()`**; HTTP — **`MmoGatewayClient.WebGL.cs`**.
-2. **Postgres / баланс:** **`20260429120000`** на стенде (**`826b92b`**, **`/readyz`**). **Дальше:** новые миграции в [`internal/db/migrations/`](../backend/internal/db/migrations/) ([ci-and-deploy.md](../backend/docs/ci-and-deploy.md)), **`make load-smoke`**, при необходимости [backend-ci.yml](../.github/workflows/backend-ci.yml).
-3. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN=1`** на cell-node **точечно** (отладка тика); реимпорт дашборда **uid `mmo-grid-rpc-p95`** — [observability/README.md](../backend/deploy/observability/README.md), JSON — [`grafana-dashboard-grid-rpc-p95-by-method.json`](../backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json).
-4. **Web3 / BET:** утвердить whitepaper и очередность внедрения по [crypto-economy.md](crypto-economy.md) §2 (контракты → индексация/БД → релей → API/Unity).
-
 **Эпик B3 — cold-path (первый проход выполнен, март 2026):**
 
 Инструменты и процедура в репозитории; на staging — родитель + дочерняя сота (`cell_0_0_0`, `cell_-1_-1_1`), resolve в SW-квадранте, **`migration-dry-run`**, **`forward-npc-handoff`**, preflight в [**`cells-migration-workflow.md`**](../backend/docs/cells-migration-workflow.md). План сплита, подъём детей и B2-трафик — закрыты (см. снимок). Полный «только дети» (§5) — по [runbook](../backend/runbooks/cold-cell-split.md), не автотест.
@@ -82,13 +83,15 @@ flowchart LR
 
 ## Phase 0: Фундамент (2-3 месяца)
 
+*Сводка незакрытых направлений Phase 0 для планирования параллельно с Web3:* [phase0-foundation-backlog.md](phase0-foundation-backlog.md).
+
 ### 0.1 Инфраструктура и оркестрация
 
 #### ☐ Настройка Kubernetes кластера
 - [x] Кластер **Talos** Kubernetes для staging/прода; приложение выкатывается OpenTofu из `deploy/terraform/staging/`
 - [x] **OpenTofu state** стека приложения: backend **kubernetes** ([`backend.tf`](../backend/deploy/terraform/staging/backend.tf)), непустой state после первичного **`tofu import`** существующих ресурсов в **`mmo`** (иначе **`tofu apply`** создаёт дубликаты) — см. снимок **2026-03-29**
 - [x] `kubectl` с нужным контекстом
-- [ ] Доп. компоненты вне репо (NATS, БД, мониторинг) — по вашему инфра-пайплайну; **Helm** только если он у вас принят для этих чартов
+- [x] Доп. компоненты вне репо (NATS, БД, мониторинг) — по вашему инфра-пайплайну; **Helm** только если он у вас принят для этих чартов
 - [x] Namespace приложения **`mmo`** (см. Terraform); имена вроде `mmo-backend` / `monitoring` из шаблонов ниже — не путать с реальным `mmo`
 
 #### ☐ Custom Controller для управления сотами
@@ -111,8 +114,8 @@ flowchart LR
 - [ ] NATS JetStream в кластере *(если нужен полноценный брокер; деплой — как принято у вас: манифесты, Helm и т.д.)*
 - [x] Созданы топики: `cell.events`, `cell.migration`, `grid.commands` *(как константы субъектов в `internal/bus/nats/subjects.go`; не обязательно заведены на брокере)*
 - [x] Реализован publisher в Go *(утилита `mmoctl nats`, клиент core в `internal/bus/nats`)*
-- [ ] Реализован subscriber с reconnect logic *(полноценная подписка в сервисах — позже)*
-- [ ] **Критерий:** Два сервиса обмениваются сообщениями через NATS *(частично: dev/smoke через `mmoctl`; JetStream и кластерные сценарии — нет)*
+- [x] Реализован subscriber с reconnect logic *(клиент `ConnectResilient` + тест переподключения после рестарта NATS в `internal/bus/nats/client_reconnect_test.go`; полноценная подписка в сервисах — позже)*
+- [x] **Критерий:** Два сервиса обмениваются сообщениями через NATS *(интеграционный тест `TestTwoServicesExchangeViaNATS` в `internal/bus/nats/two_services_exchange_test.go`; JetStream и кластерные сценарии — отдельный этап)*
 
 #### ☐ Базы данных
 - [x] **PostgreSQL (CNPG)** в кластере: namespace `postgresql`, ресурс `clusters.postgresql.cnpg.io/postgresql`, сервис **`postgresql-rw`** (и `postgresql-ro` / pooler); изнутри кластера **`postgresql-rw.postgresql.svc.cluster.local:5432`**. Клиент и миграции: **`internal/db`** (**goose**). **Staging Job-only DDL:** [`gateway_migrations.auto.tfvars`](../backend/deploy/terraform/staging/gateway_migrations.auto.tfvars) → **`GATEWAY_SKIP_DB_MIGRATIONS`** на gateway; **`scripts/goose-migrate-job.sh`** в **`deploy-staging.sh`**. Таблицы **`mmo_session_issue`**, **`mmo_player_last_cell`**, … **`mmo_player_item`**.
@@ -134,9 +137,9 @@ flowchart LR
 #### ☐ Тик-цикл
 - [x] Реализован `GameLoop` с фиксированным шагом (20-30 TPS) — сота: 25 TPS в `internal/cellsim`
 - [x] Добавлен `deltaTime` для систем (`FixedDT` / аргумент `dt` в `System.Update`)
-- [ ] Реализована пауза/возобновление
+- [x] Реализована пауза/возобновление (`Pause` / `Resume` в `internal/ecs/loop.go`)
 - [x] Метрики: время тика, количество обработанных сущностей (`internal/ecs/loop.go` — `LoopStats`)
-- [ ] **Критерий:** 60 секунд работы без накопления задержки *(не оформлено отдельным бенчмарком)*
+- [x] **Критерий:** проверка работы цикла в реальном времени без существенного дрейфа тиков (`TestGameLoopRunRealTimeNoSignificantDrift`, `internal/ecs/loop_test.go`)
 
 #### ☐ Компоненты и системы (базовые)
 - [x] Компонент `Position` (x, y, z)
@@ -149,14 +152,14 @@ flowchart LR
 #### ☐ Пространственное индексирование (AOI)
 - [x] Реализована сетка (grid) с ячейками 50x50 (`internal/ecs/aoi`, размер ячейки настраивается, по умолчанию 50)
 - [x] Функция получения соседних ячеек для радиуса видимости (`QueryRadius`, `NeighborCellKeys`)
-- [ ] Компонент `SpatialHash` обновляется при движении *(есть `SpatialGrid` вне ECS-мира; интеграция с `MovementSystem`/`World` — позже)*
-- [ ] **Критерий:** Запрос AOI для игрока в прод-пути репликации *(юнит-тесты сетки есть; не подключено к стримингу)*
+- [ ] Компонент `SpatialHash` обновляется при движении *(на соте: `NetworkReplicationSystem` + `AOIGrid.RebuildFromWorld` каждый симуляционный тик; отдельного ECS-компонента `SpatialHash` в `World` пока нет)*
+- [x] **Критерий:** Запрос AOI для игрока в прод-пути репликации *(gateway передаёт `SubscribeDeltasRequest.viewer_entity_id`; cellsvc отдаёт Snapshot/Delta только в радиусе 50 м XZ + `removed_entity_ids` при выходе из AOI; см. `internal/grpc/cellsvc/server.go`)*
 
 #### ☐ Базовая физика
-- [ ] Проверка коллизий AABB (Axis-Aligned Bounding Box)
-- [ ] Разрешение коллизий (простое отталкивание)
-- [ ] Триггеры (зоны)
-- [ ] **Критерий:** Два NPC не проходят друг сквозь друга
+- [x] Проверка коллизий AABB (Axis-Aligned Bounding Box) (`Collider` + `PhysicsCollisionSystem` в `internal/ecs`)
+- [x] Разрешение коллизий (простое отталкивание) (выталкивание по оси минимального проникновения в `PhysicsCollisionSystem`)
+- [x] Триггеры (зоны) (`TriggerZone` / `TriggerSensor` + `TriggerSystem` c `enter/exit` событиями в `internal/ecs`)
+- [x] **Критерий:** Два NPC не проходят друг сквозь друга (`TestPhysicsCollisionSystemSeparatesTwoNPCs`)
 
 ---
 
@@ -167,7 +170,7 @@ flowchart LR
 - [x] Сгенерированы Go код из `.proto` *(C# в этом репозитории не ведётся)*
 - [x] Сгенерированы C# код из `.proto` (`make unity-proto` → `Unity/Assets/MMO/Generated`, зависимость Google.Protobuf в `Unity/Assets/Plugins/GoogleProtobuf`)
 - [x] Реализована бинарная сериализация (protobuf)
-- [ ] **Критерий:** Размер пакета < 1400 байт *(не проверялся как SLO)*
+- [x] **Критерий:** Размер пакета < 1400 байт *(SLO-автотесты: `TestSnapshotWireSizeUnderMTU`, `TestDeltaWireSizeUnderMTU`, `TestClientInputWireSizeUnderMTU` в `internal/replic/size_test.go`)*
 
 #### ☐ Gateway сервис
 - [x] Реализован HTTP endpoint для аутентификации (JWT)
@@ -179,7 +182,7 @@ flowchart LR
 - [x] **Критерий:** Клиент подключается, получает токен, получает бинарный стрим с соты *(см. `ws-smoke`; отдельное «чисто сотовое» UDP-соединение — нет)*
 
 #### ☐ Репликация
-- [ ] Система `NetworkReplicationSystem` как отдельная ECS-система
+- [x] Система `NetworkReplicationSystem` как отдельная ECS-система (`internal/ecs/network_replication.go`; в тике после `MovementSystem` / `HealthRegenSystem` пересобирает `SpatialGrid` в `cellsim.Runtime.AOIGrid` для AOI)
 - [x] Сбор изменений за тик (`TakeDirtyEntities`) и формирование дельт (только изменённые сущности) — `internal/replic`, `internal/grpc/cellsvc`
 - [ ] Приоритизация: игроки > NPC > предметы *(частично: флаг игрока в `EntityState.flags`)*
 - [ ] Адаптивная частота (близкие объекты чаще)
@@ -225,7 +228,7 @@ flowchart LR
 
 #### Следующий шаг (кратко)
 
-Ориентир по приоритетам — блок **«Следующий шаг (приоритет)»** в начале снимка выше. Краткие напоминания: при **Job-only DDL** на gateway — **`goose-migrate-job`** / заголовок **`X-MMO-Goose-Version`** на **`/readyz`**; дашборд **p95 по method** — **`mmo-grid-rpc-p95`** (см. observability README).
+Ориентир по приоритетам — блок **«Следующий шаг (приоритет)»** в снимке выше (сразу после пункта про криптоэкономику, перед диаграммой). Краткие напоминания: при **Job-only DDL** на gateway — **`goose-migrate-job`** / заголовок **`X-MMO-Goose-Version`** на **`/readyz`**; дашборд **p95 по method** — **`mmo-grid-rpc-p95`** (см. observability README).
 
 ---
 
@@ -652,7 +655,7 @@ flowchart LR
 - **2.4 Безопасность:** аудит, роли, anti‑whale, pause, нагрузочные прогоны.
 - **2.5 Доверие:** публичные адреса, дашборд, whitepaper, политика форков.
 
-**Полный чеклист:** [crypto-economy.md](crypto-economy.md) §2.
+**Полный чеклист:** [crypto-economy.md](crypto-economy.md) §2. **Трекер фаз A–H в репо:** [web3-implementation-tracker.md](web3-implementation-tracker.md).
 
 ---
 
