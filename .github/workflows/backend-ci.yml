@@ -1,0 +1,30 @@
+# Backend: модульные и интеграционные тесты Go.
+# После деплоя gateway в среде с БД и миграциями запускайте
+# `make verify-readyz-goose` (см. backend/scripts/verify-gateway-readyz-goose.sh).
+name: backend-ci
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+          cache-dependency-path: backend/go.sum
+      - name: go test
+        run: go test ./...

@@ -1,0 +1,3 @@
+# Монорепо: подкаталоги backend/ и Unity/ имеют свои .gitignore.
+.DS_Store
+.cursor/
