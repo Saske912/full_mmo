@@ -17,7 +17,7 @@
 
 ---
 
-## Снимок состояния (март 2026, обновлено 2026-03-28)
+## Снимок состояния (март 2026, обновлено 2026-03-29)
 
 **Каноничный полный чеклист** ведётся только в этом файле суперпроекта (**`docs/roadmap-checklist.md`**). В репозитории **`mmo`** файл **`checklist.md`** — короткий указатель сюда (без дублирования фаз).
 
@@ -63,10 +63,10 @@ flowchart LR
 
 **Следующий шаг (приоритет):**
 
-1. **Unity:** полировка движения (prediction по желанию); UX инвентаря (клики по строкам). **WebGL:** отдельный транспорт для **мирового WS** уже есть — [`MmoWebSocket.jslib`](../Unity/Assets/Plugins/WebGL/MmoWebSocket.jslib), ветка **`MmoWorldStreamClient`** при `UNITY_WEBGL` и **`Poll()`** в bootstrap (см. снимок выше); дальше — **e2e** на реальном билде (https + **wss**, шаг 8 снимка); при проблемах с **HTTP** к gateway — сверить **`MmoGatewayClient`** (**`HttpClient`**) с целевой версией Unity или вынести запросы на **UnityWebRequest**.
-2. **Postgres / баланс:** контент, баланс и нагрузочные прогоны; **базовый выкат staging** (OpenTofu state + [deploy-staging.sh](../backend/scripts/deploy-staging.sh) + [staging-verify.sh](../backend/scripts/staging-verify.sh)) — зафиксирован в снимке **2026-03-28**; детали в [ci-and-deploy.md](../backend/docs/ci-and-deploy.md). **GitHub Actions** ([backend-ci.yml](../.github/workflows/backend-ci.yml)) — опционально; при необходимости автопрогонов — учесть **submodules** для `backend/` в суперпроекте.
-3. **Соты:** **`ListMigrationCandidates`** / `migration-dry-run`, live-handoff; [runbook](../backend/runbooks/cold-cell-split.md) §**7–8**, [`run-forward-npc-handoff.sh`](../backend/scripts/run-forward-npc-handoff.sh).
-4. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN`** точечно; [grafana-dashboard-grid-rpc-p95-by-method.json](../backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json) — реимпорт при новом Grafana (**uid `mmo-grid-rpc-p95`**).
+1. **Unity:** полировка движения (prediction по желанию); UX инвентаря (клики по строкам). **WebGL:** транспорт **мирового WS** — [`MmoWebSocket.jslib`](../Unity/Assets/Plugins/WebGL/MmoWebSocket.jslib), **`MmoWorldStreamClient`**, **`Poll()`** в bootstrap; чеклист e2e против staging — [webgl-staging-e2e.md](webgl-staging-e2e.md) и **шаг 8** снимка выше; при проблемах HTTP — **`MmoGatewayClient`** (WebGL: **UnityWebRequest** в `MmoWebSocket.jslib` / partial-классах).
+2. **Postgres / баланс:** итерации **контента и баланса** в БД; после изменений — цикл [deploy-staging.sh](../backend/scripts/deploy-staging.sh) → [staging-verify.sh](../backend/scripts/staging-verify.sh) → при необходимости **[`make load-smoke`](../backend/Makefile)** (параметры в [ci-and-deploy.md](../backend/docs/ci-and-deploy.md)). Базовый пайплайн staging + OpenTofu state — в снимке выше; **расширять** [backend-ci.yml](../.github/workflows/backend-ci.yml) по мере нужды (checkout с **submodules** уже задан).
+3. **Соты:** **`ListMigrationCandidates`** / **`migration-dry-run`**, движение к **live-handoff**; указатель — [cells-migration-workflow.md](../backend/docs/cells-migration-workflow.md); runbook [cold-cell-split.md](../backend/runbooks/cold-cell-split.md) §**7–8**; дым — [`run-forward-npc-handoff.sh`](../backend/scripts/run-forward-npc-handoff.sh).
+4. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN=1`** на cell-node **точечно** (отладка тика); реимпорт дашборда **uid `mmo-grid-rpc-p95`** — шаги в [observability/README.md](../backend/deploy/observability/README.md), JSON — [`grafana-dashboard-grid-rpc-p95-by-method.json`](../backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json).
 5. **Web3 / BET:** утвердить whitepaper и очередность внедрения по [crypto-economy.md](crypto-economy.md) §2 (контракты → индексация/БД → релей → API/Unity).
 
 **Эпик B3 — cold-path (первый проход выполнен, март 2026):**
@@ -229,7 +229,7 @@ flowchart LR
 
 #### Следующий шаг (кратко)
 
-**Unity:** сцена + UI поверх **`MmoGatewayClient`** / **`MmoWorldStreamClient`**; **WebGL** — после билда прогон против staging (**wss**), см. шаг 8 снимка. **DDL:** `gateway_skip_db_migrations` + **`STAGING_RUN_GOOSE_JOB=1`**. **Смоук:** **`gateway-api-smoke`**, опц. **`STAGING_VERIFY_READYZ_GOOSE_HEADER`**. **Grafana:** импорт **`mmo-grid-rpc-p95`**.
+Ориентир по приоритетам — блок **«Следующий шаг (приоритет)»** в начале снимка выше. Краткие напоминания: при **Job-only DDL** на gateway — **`goose-migrate-job`** / заголовок **`X-MMO-Goose-Version`** на **`/readyz`**; дашборд **p95 по method** — **`mmo-grid-rpc-p95`** (см. observability README).
 
 ---
 
