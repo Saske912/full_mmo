@@ -39,6 +39,6 @@ git clone --recurse-submodules git@github.com:Saske912/full_mmo.git MMO
 | `backend/` | `git@github.com:Saske912/mmo.git` | `https://github.com/Saske912/mmo.git` |
 | `Unity/` | `git@github.com:Saske912/Unity.git` | `https://github.com/Saske912/Unity.git` |
 
-В **`mmo`** — сервер; в **`Unity`** — только клиент. **Корень** пушится в **`full_mmo`**. Пуши из `backend/` и `Unity/` — в свои репозитории; после обновления закрепите коммит в суперпроекте: `git add backend Unity && git commit -m "Bump submodules"`.
+В **`mmo`** — сервер; в **`Unity`** — только клиент. **Корень** пушится в **`full_mmo`**. Пуши из `backend/` и `Unity/` — в свои репозитории; после обновления закрепите коммит в суперпроекте: `git add backend Unity && git commit -m "Bump submodules"`. Единый roadmap и чеклист по фазам — в **`docs/roadmap-checklist.md`**; в **`backend/checklist.md`** только ссылка, без дублирования.
 
 Подробнее: **[`docs/README.md`](docs/README.md)**.
