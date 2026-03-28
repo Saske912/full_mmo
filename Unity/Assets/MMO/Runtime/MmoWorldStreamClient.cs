@@ -1,18 +1,194 @@
-#if UNITY_WEBGL && !UNITY_EDITOR
-// ClientWebSocket недоступен в WebGL-сборке; используйте отдельный транспорт или только HTTP.
-#else
-
 using System;
-using System.Net.WebSockets;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Mmo.Cell.V1;
 using Mmo.Game.V1;
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+
 namespace Mmo.Client.Gateway
 {
-    /// <summary>Приём бинарных <see cref="WorldChunk"/> с gateway WebSocket (как в Go <c>proto.Marshal(chunk)</c>).</summary>
+    /// <summary>WebGL: бинарный WebSocket через jslib (браузерный API). Read-loop — <see cref="Poll"/> с главного потока.</summary>
+    public sealed class MmoWorldStreamClient : IDisposable
+    {
+        int _id = -1;
+        CancellationTokenSource _lifetime;
+
+        public bool IsConnected => _id >= 0 && MmoWs_GetReadyState(_id) == 1;
+
+        public event Action<WorldChunk> OnWorldChunk;
+        public event Action<Exception> OnError;
+
+        public async Task ConnectAsync(Uri wsUri, CancellationToken cancellationToken = default)
+        {
+            CloseSocket();
+            DisposeLifetime();
+            _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var id = MmoWs_Create(wsUri.AbsoluteUri);
+            if (id < 0)
+            {
+                throw new InvalidOperationException("MmoWs_Create failed");
+            }
+            _id = id;
+            try
+            {
+                while (MmoWs_GetReadyState(_id) == 0)
+                {
+                    _lifetime.Token.ThrowIfCancellationRequested();
+                    await Task.Delay(32, _lifetime.Token).ConfigureAwait(true);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Dispose();
+                throw;
+            }
+            if (MmoWs_GetReadyState(_id) != 1)
+            {
+                Dispose();
+                throw new InvalidOperationException("WebSocket did not open");
+            }
+        }
+
+        /// <summary>Вызывать из <c>Update</c> главного потока для приёма кадров.</summary>
+        public void Poll()
+        {
+            if (_id < 0 || MmoWs_GetReadyState(_id) != 1)
+            {
+                return;
+            }
+            const int max = 1024 * 64;
+            var buf = Marshal.AllocHGlobal(max);
+            var wptr = Marshal.AllocHGlobal(4);
+            try
+            {
+                for (var i = 0; i < 32; i++)
+                {
+                    var r = MmoWs_DequeueRecv(_id, buf, max, wptr);
+                    var written = Marshal.ReadInt32(wptr);
+                    if (r == 0 || written <= 0)
+                    {
+                        break;
+                    }
+                    if (r < 0)
+                    {
+                        OnError?.Invoke(new InvalidOperationException("MmoWs recv buffer too small"));
+                        break;
+                    }
+                    var data = new byte[written];
+                    Marshal.Copy(buf, data, 0, written);
+                    try
+                    {
+                        var chunk = WorldChunk.Parser.ParseFrom(data);
+                        OnWorldChunk?.Invoke(chunk);
+                    }
+                    catch (InvalidProtocolBufferException ex)
+                    {
+                        OnError?.Invoke(ex);
+                    }
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(wptr);
+                Marshal.FreeHGlobal(buf);
+            }
+        }
+
+        public Task SendInputAsync(ClientInput input, CancellationToken ct = default)
+        {
+            if (_id < 0 || MmoWs_GetReadyState(_id) != 1)
+            {
+                return Task.CompletedTask;
+            }
+            var bytes = input.ToByteArray();
+            var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                if (MmoWs_Send(_id, handle.AddrOfPinnedObject(), bytes.Length) == 0)
+                {
+                    return Task.CompletedTask;
+                }
+            }
+            finally
+            {
+                handle.Free();
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task CloseAsync()
+        {
+            CloseSocket();
+            DisposeLifetime();
+            return Task.CompletedTask;
+        }
+
+        void CloseSocket()
+        {
+            if (_id < 0)
+            {
+                return;
+            }
+            MmoWs_Close(_id);
+            MmoWs_Destroy(_id);
+            _id = -1;
+        }
+
+        void DisposeLifetime()
+        {
+            if (_lifetime == null)
+            {
+                return;
+            }
+            try
+            {
+                _lifetime.Cancel();
+                _lifetime.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+            _lifetime = null;
+        }
+
+        public void Dispose()
+        {
+            CloseSocket();
+            DisposeLifetime();
+        }
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_Create")]
+        static extern int MmoWs_Create(string url);
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_GetReadyState")]
+        static extern int MmoWs_GetReadyState(int id);
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_Send")]
+        static extern int MmoWs_Send(int id, IntPtr ptr, int length);
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_Close")]
+        static extern void MmoWs_Close(int id);
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_DequeueRecv")]
+        static extern int MmoWs_DequeueRecv(int id, IntPtr outPtr, int outBufLen, IntPtr writtenLenPtr);
+
+        [DllImport("__Internal", EntryPoint = "MmoWs_Destroy")]
+        static extern void MmoWs_Destroy(int id);
+    }
+}
+
+#else
+
+using System.Net.WebSockets;
+
+namespace Mmo.Client.Gateway
+{
+    /// <summary>Приём бинарных <see cref="WorldChunk"/> с gateway WebSocket (как в Go <c>proto.Marshal</c>).</summary>
     public sealed class MmoWorldStreamClient : IDisposable
     {
         readonly ClientWebSocket _ws = new ClientWebSocket();
@@ -20,14 +196,9 @@ namespace Mmo.Client.Gateway
 
         public bool IsConnected => _ws.State == WebSocketState.Open;
 
-        /// <summary>Событие в потоке фонового read-loop; маршалить на main thread при необходимости.</summary>
         public event Action<WorldChunk> OnWorldChunk;
-
         public event Action<Exception> OnError;
 
-        /// <summary>
-        /// Подключение к <c>/v1/ws?token=</c>. При 409 (handoff) будет исключение; сначала вызовите POST /v1/session с новыми resolve_x/z.
-        /// </summary>
         public async Task ConnectAsync(Uri wsUri, CancellationToken cancellationToken = default)
         {
             DisposeLifetime();
@@ -51,7 +222,7 @@ namespace Mmo.Client.Gateway
             {
                 while (!ct.IsCancellationRequested && _ws.State == WebSocketState.Open)
                 {
-                    using var ms = new System.IO.MemoryStream();
+                    using var ms = new MemoryStream();
                     WebSocketReceiveResult result;
                     do
                     {
@@ -117,7 +288,8 @@ namespace Mmo.Client.Gateway
             {
                 try
                 {
-                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None).ConfigureAwait(false);
+                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None)
+                        .ConfigureAwait(false);
                 }
                 catch
                 {
@@ -126,7 +298,6 @@ namespace Mmo.Client.Gateway
             }
         }
 
-        /// <summary>Бинарный кадр <see cref="ClientInput"/> (совместимо с gateway <c>proto.Unmarshal</c>).</summary>
         public Task SendInputAsync(ClientInput input, CancellationToken ct = default)
         {
             if (_ws.State != WebSocketState.Open)
@@ -144,4 +315,5 @@ namespace Mmo.Client.Gateway
         }
     }
 }
+
 #endif

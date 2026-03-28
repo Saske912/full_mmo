@@ -23,6 +23,7 @@
 - **Персист соты:** при непустом `REDIS_ADDR` cell-node сохраняет protobuf `CellPersist` в ключ `mmo:cell:{cell_id}:state` перед graceful shutdown (`-persist-snapshot`, по умолчанию вкл.) и восстанавливает при старте (игроки не в снепшоте); без Redis — как раньше.
 - **Consul:** регистрация с `bounds`, `level`, логический id в meta (`mmo_cell_id`), уникальный id инстанса на pod (`HOSTNAME`); при shutdown — `ServiceDeregister` по тому же составному id. **Без отдельного health-check:** в каталоге сервис без checks считается passing (обход проблем `UpdateTTL` на агенте в этом окружении).
 - **БД в кластере (операторы уже стоят):** **CloudNativePG**; DSN **`DATABASE_URL_RW`** в Secret **`mmo-backend`**. **Gateway / goose (staging):** DDL из Job **`/migrate`** (`goose-migrate-job`), gateway без **`RunMigrations`**. См. **`gateway_migrations.auto.tfvars`**. Таблицы: **`mmo_session_issue`**, **`mmo_player_last_cell`**, … **`mmo_item_def`** / **`mmo_player_item`**. **ScyllaDB** — клиента в MMO пока нет *(инфра `scylla` — Phase 0)*.
+- **Криптоэкономика (дизайн):** токен **BET**, NFT (soulbound / продаваемые), **burn**, газлесс‑релей, мультисиг — описаны на уровне продуктового дизайна; **смарт‑контракты, релей и on-chain синк в коде репозитория пока не реализованы**. Канон: [`docs/crypto-economy.md`](docs/crypto-economy.md).
 
 ```mermaid
 flowchart LR
@@ -41,9 +42,10 @@ flowchart LR
 **Следующий шаг (приоритет):**
 
 1. **Unity:** полировка движения (prediction по желанию); UX инвентаря (клики по строкам); **WebGL** — отдельный транспорт.
-2. **Postgres / баланс:** контент и нагрузка; CI — [`.github/workflows/backend-ci.yml`](.github/workflows/backend-ci.yml); после деплоя — **`make verify-readyz-goose`**.
+2. **Postgres / баланс:** контент и нагрузка; CI и пост-деплой: [`backend/docs/ci-and-deploy.md`](backend/docs/ci-and-deploy.md), [`.github/workflows/backend-ci.yml`](.github/workflows/backend-ci.yml).
 3. **Соты:** **`ListMigrationCandidates`** / `migration-dry-run`, live-handoff; [runbook](backend/runbooks/cold-cell-split.md) §**7–8**, [`backend/scripts/run-forward-npc-handoff.sh`](backend/scripts/run-forward-npc-handoff.sh).
 4. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN`** точечно; [`backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json`](backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json) — реимпорт при новом Grafana (**uid `mmo-grid-rpc-p95`**).
+5. **Web3 / BET:** утвердить whitepaper и очередность внедрения по [`docs/crypto-economy.md`](docs/crypto-economy.md) §2 (контракты → индексация/БД → релей → API/Unity).
 
 **Эпик B3 — cold-path (первый проход выполнен, март 2026):**
 
@@ -617,6 +619,24 @@ flowchart LR
 
 ---
 
+## Эпик: Криптоэкономика (Web3)
+
+Связь с текущим MMO: в **`/v1/session`** уже есть игровой **`wallet`** / **`gold`**, **`inventory`**, **`items`** (off-chain, PostgreSQL) — это **не** токен **BET** и **не** on-chain баланс. Слой **BET / NFT / burn** вводится **отдельно**; пересечения только через явные правила (например, косметика NFT vs soulbound боевой лут — см. тезисы в документе).
+
+**Дорожная карта (высокоуровнево):** смарт‑контракты и аудит → индексация событий / синк с **PostgreSQL** (и кэш **Redis**) → газлесс‑релей и BFF → клиент **Unity** (кошелёк «под капотом», аукцион, коллективное открытие зон).
+
+**Кратко по областям внедрения** (детальные чекбоксы — в документе §2):
+
+- **2.1 Контракты:** BET ERC‑20, soulbound ERC‑1155, ERC‑721, аукцион, открытие контента, турниры, мультисиг, релей.
+- **2.2 Игра:** embedded wallet, покупки/аукцион/зоны/турниры за BET, метрики burn и NFT.
+- **2.3 Инфра:** RPC, релей, индексатор → БД/Redis, DEX/ликвидность, резерв казны.
+- **2.4 Безопасность:** аудит, роли, anti‑whale, pause, нагрузочные прогоны.
+- **2.5 Доверие:** публичные адреса, дашборд, whitepaper, политика форков.
+
+**Полный чеклист:** [`docs/crypto-economy.md`](docs/crypto-economy.md) §2.
+
+---
+
 ## Итоговая таблица прогресса
 
 | Phase | Всего задач | Статус | Комментарий |
@@ -626,7 +646,8 @@ flowchart LR
 | Phase 2 | 56 | ☐ | |
 | Phase 3 | 52 | ☐ | |
 | Phase 4 | 32 | ☐ | |
-| **Total** | **240** | **0%** | |
+| Эпик Web3 / BET | — | ☐ | [docs/crypto-economy.md](docs/crypto-economy.md); без изменения суммы Phase 0–4 |
+| **Total** | **240** | **0%** | См. Phase 0–4; эпик Web3 ведётся отдельно |
 
 ---
 

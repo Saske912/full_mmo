@@ -117,6 +117,18 @@ mmoctl -registry <grid-manager:9100> migration-dry-run <cell_id>
 - Полный **cold-cycle** и drain остаются в §7; **live-handoff** без полного cold-path — продуктовый приоритет (обновление состояния без простоя клиентов).
 - Клиентский реконнект после смены покрытия: **`GET /v1/me/last-cell`** (§7).
 
+## 9. Следующие шаги (приоритет оператора / продукта)
+
+Рекомендуемая последовательность после cold-path MVP:
+
+1. **Сверка сущностей:** `migration-dry-run` / **`ListMigrationCandidates`** на родителе (из кластера: `STAGING_VERIFY_MIGRATION_DRY_RUN=incluster` или [`scripts/mmoctl-in-cluster.sh`](../scripts/mmoctl-in-cluster.sh)) — сопоставить вывод с ожидаемым handoff.
+2. **Окно и drain:** как в §7 п.1 — **`set-split-drain true`**, дождаться отсутствия игроков на родителе либо объявить реконнект.
+3. **NPC:** **`forward-npc-handoff`** (обёртка: [`scripts/run-forward-npc-handoff.sh`](../scripts/run-forward-npc-handoff.sh)) или пары export/import из §6.
+4. **Инфра и drain off:** обновить `cell_instances`, `tofu apply`, **`set-split-drain false`** перед выводом родителя при необходимости.
+5. **Клиенты:** новые сессии + **`GET /v1/me/last-cell`** для координат реконнекта; **live-migrate игроков без реконнекта** — вне текущего scope (см. ниже).
+
+**Долгосрочно (live-handoff):** перенос состояния при активных сессиях без полного cold-cycle — отдельный эпик (согласование с gateway/cell и очередью миграций); до этого чеклист выше остаётся операторским эталоном.
+
 ## Вне этой процедуры
 
 - Live-migrate **игроков** и автоматический redirect в gateway при смене покрытия (сейчас — только реконнект клиента).

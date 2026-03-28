@@ -1,7 +1,3 @@
-#if UNITY_WEBGL && !UNITY_EDITOR
-// WebGL: ClientWebSocket отключён в MmoWorldStreamClient; эта сцена для Standalone/редактора.
-#else
-
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -31,6 +27,9 @@ namespace Mmo.Client.Unity
         [SerializeField] float _entityCubeScale = 0.5f;
         [Tooltip("Сглаживание позиций кубов к авторитетным координатам соты (выше — меньше отставание).")]
         [SerializeField] float _positionSmoothing = 14f;
+        [Tooltip("0 = выкл. Линейное предсказание позиции по последней дельте авторитета (доля смешивания к extrapolated).")]
+        [Range(0f, 1f)]
+        [SerializeField] float _positionExtrapolation = 0f;
 
         MmoGatewayClient _gateway;
         MmoWorldStreamClient _world;
@@ -52,6 +51,7 @@ namespace Mmo.Client.Unity
         InputField _uiQuestId;
         Button _uiItemRemove;
         InputField _uiItemId;
+        RectTransform _inventoryRowsRoot;
 
         string _jwt;
         volatile bool _connectBusy;
@@ -127,7 +127,9 @@ namespace Mmo.Client.Unity
             _uiStatus = AddText(canvasGo.transform, "Статус: не подключено", y, 32, new Color(1f, 1f, 0.92f), true);
             y -= row * 1.45f;
             _uiMeta = AddTextMultiline(canvasGo.transform, "", y, 26, new Color(0.78f, 0.92f, 1f), 380f);
-            y -= 400f;
+            y -= 392f;
+            _inventoryRowsRoot = AddInventoryRowsHost(canvasGo.transform, y);
+            y -= 220f;
 
             _uiQuestId = AddLabeledField(canvasGo.transform, "Квест (id для отладки)", labelW, fieldW, y, labelFs, fieldFs, "tutorial_intro");
             y -= row;
@@ -304,6 +306,9 @@ namespace Mmo.Client.Unity
 
         void Update()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            _world?.Poll();
+#endif
             lock (_pendingChunks)
             {
                 while (_pendingChunks.Count > 0)
@@ -329,7 +334,7 @@ namespace Mmo.Client.Unity
                 {
                     continue;
                 }
-                if (!_worldState.TryGetAuthoritative(kv.Key, out var target))
+                if (!_worldState.TryGetDisplayTarget(kv.Key, _positionExtrapolation, out var target))
                 {
                     continue;
                 }
@@ -630,7 +635,90 @@ namespace Mmo.Client.Unity
             {
                 questLines = "• квестов в ответе нет\n";
             }
-            _uiMeta.text = $"Золото: {gold}\n\nИнвентарь (сессия):\n{itemLines}\nКвесты:\n{questLines}";
+            _uiMeta.text = $"Золото: {gold}\n\nИнвентарь (сессия):\n{itemLines}Нажмите строку ниже для выбора id.\nКвесты:\n{questLines}";
+            RebuildInventoryRows(items);
+        }
+
+        static RectTransform AddInventoryRowsHost(Transform parent, float y)
+        {
+            var go = new GameObject("InventoryRows");
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0, 1);
+            rt.anchorMax = new Vector2(0, 1);
+            rt.pivot = new Vector2(0, 1);
+            rt.anchoredPosition = new Vector2(28f, y);
+            rt.sizeDelta = new Vector2(720f, 200f);
+            var v = go.AddComponent<VerticalLayoutGroup>();
+            v.childAlignment = TextAnchor.UpperLeft;
+            v.spacing = 4f;
+            v.childControlHeight = true;
+            v.childControlWidth = true;
+            v.childForceExpandHeight = false;
+            v.childForceExpandWidth = true;
+            return rt;
+        }
+
+        void RebuildInventoryRows(List<ItemStackDto> items)
+        {
+            if (_inventoryRowsRoot == null)
+            {
+                return;
+            }
+            for (var i = _inventoryRowsRoot.childCount - 1; i >= 0; i--)
+            {
+                Destroy(_inventoryRowsRoot.GetChild(i).gameObject);
+            }
+            if (items == null || items.Count == 0)
+            {
+                return;
+            }
+            foreach (var it in items)
+            {
+                var id = string.IsNullOrEmpty(it.ItemId) ? "" : it.ItemId;
+                var dn = string.IsNullOrEmpty(it.DisplayName) ? id : it.DisplayName;
+                var caption = $"{id} × {it.Quantity} — {dn}";
+                AddInventoryRowButton(_inventoryRowsRoot, caption, id);
+            }
+        }
+
+        void AddInventoryRowButton(Transform parent, string caption, string itemId)
+        {
+            var go = new GameObject("InvRow");
+            go.transform.SetParent(parent, false);
+            var le = go.AddComponent<LayoutElement>();
+            le.minHeight = 36f;
+            le.preferredHeight = 36f;
+            var img = go.AddComponent<Image>();
+            img.color = new Color(0.12f, 0.18f, 0.28f, 0.92f);
+            var b = go.AddComponent<Button>();
+            b.targetGraphic = img;
+            var colors = b.colors;
+            colors.highlightedColor = new Color(0.2f, 0.28f, 0.42f);
+            colors.pressedColor = new Color(0.1f, 0.14f, 0.22f);
+            b.colors = colors;
+
+            var textGo = new GameObject("Text");
+            textGo.transform.SetParent(go.transform, false);
+            var trt = textGo.AddComponent<RectTransform>();
+            trt.anchorMin = Vector2.zero;
+            trt.anchorMax = Vector2.one;
+            trt.offsetMin = new Vector2(10f, 4f);
+            trt.offsetMax = new Vector2(-10f, -4f);
+            var tx = textGo.AddComponent<Text>();
+            tx.font = UiFont();
+            tx.fontSize = 20;
+            tx.color = new Color(0.92f, 0.95f, 1f);
+            tx.alignment = TextAnchor.MiddleLeft;
+            tx.text = caption;
+            AddTextOutline(tx);
+
+            var pick = itemId;
+            b.onClick.AddListener(() =>
+            {
+                _uiItemId.text = pick;
+                SetStatus("Предмет для remove: " + pick);
+            });
         }
 
         void SetStatus(string msg)
@@ -698,4 +786,3 @@ namespace Mmo.Client.Unity
         }
     }
 }
-#endif

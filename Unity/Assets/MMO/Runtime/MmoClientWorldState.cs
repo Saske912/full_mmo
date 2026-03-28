@@ -1,6 +1,3 @@
-#if UNITY_WEBGL && !UNITY_EDITOR
-#else
-
 using System.Collections.Generic;
 using Google.Protobuf.Collections;
 using Mmo.Game.V1;
@@ -12,15 +9,18 @@ namespace Mmo.Client.Unity
     public sealed class MmoClientWorldState
     {
         readonly Dictionary<ulong, Vector3> _authoritative = new Dictionary<ulong, Vector3>();
+        readonly Dictionary<ulong, Vector3> _previous = new Dictionary<ulong, Vector3>();
 
         public void Clear()
         {
             _authoritative.Clear();
+            _previous.Clear();
         }
 
         public void ReplaceFromSnapshot(RepeatedField<EntityState> entities)
         {
             _authoritative.Clear();
+            _previous.Clear();
             if (entities == null)
             {
                 return;
@@ -37,12 +37,36 @@ namespace Mmo.Client.Unity
             {
                 return;
             }
-            _authoritative[e.EntityId] = ToVector3(e.Position);
+            var id = e.EntityId;
+            var next = ToVector3(e.Position);
+            if (_authoritative.TryGetValue(id, out var cur))
+            {
+                _previous[id] = cur;
+            }
+            _authoritative[id] = next;
         }
 
         public bool TryGetAuthoritative(ulong entityId, out Vector3 position)
         {
             return _authoritative.TryGetValue(entityId, out position);
+        }
+
+        /// <summary>Цель для визуала: при extrapolation01 &gt; 0 смешивает к (auth + (auth − prev)).</summary>
+        public bool TryGetDisplayTarget(ulong entityId, float extrapolation01, out Vector3 worldPos)
+        {
+            if (!_authoritative.TryGetValue(entityId, out var auth))
+            {
+                worldPos = default;
+                return false;
+            }
+            if (extrapolation01 <= 0f || !_previous.TryGetValue(entityId, out var prev))
+            {
+                worldPos = auth;
+                return true;
+            }
+            var delta = auth - prev;
+            worldPos = Vector3.Lerp(auth, auth + delta, Mathf.Clamp01(extrapolation01));
+            return true;
         }
 
         public IEnumerable<ulong> EnumerateEntityIds()
@@ -56,4 +80,3 @@ namespace Mmo.Client.Unity
         }
     }
 }
-#endif
