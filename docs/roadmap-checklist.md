@@ -61,26 +61,22 @@ flowchart LR
   cell --> consul
 ```
 
-**Следующий шаг (приоритет):**
+**Следующий шаг (приоритет):** *(выполненное по Unity playground, сотам и preflight см. снимок выше.)*
 
-1. **Unity / WebGL:** в playground сделаны подсветка инвентаря, refresh меты после quest/remove, лёгкая экстраполяция по умолчанию — см. снимок. **Дальше:** **WebGL** e2e на реальном билде — [webgl-staging-e2e.md](webgl-staging-e2e.md) и **шаг 8**; при желании — тоньше prediction (`MmoGameBootstrap` / сеть). Транспорт WS: [`MmoWebSocket.jslib`](../Unity/Assets/Plugins/WebGL/MmoWebSocket.jslib), **`MmoWorldStreamClient`**, **`Poll()`**; HTTP в WebGL — **`UnityWebRequest`** (`MmoGatewayClient.WebGL.cs`).
-2. **Postgres / баланс:** в репо миграция **`20260429120000`** — **выкатить** [deploy-staging.sh](../backend/scripts/deploy-staging.sh), проверить **`/readyz`** (**`20260429120000`**) и [staging-verify.sh](../backend/scripts/staging-verify.sh); дальнейшие итерации — новые файлы в [`internal/db/migrations/`](../backend/internal/db/migrations/) (см. [ci-and-deploy.md](../backend/docs/ci-and-deploy.md)); при необходимости **`make load-smoke`**. **GHA** — [backend-ci.yml](../.github/workflows/backend-ci.yml) по мере нужды.
-3. **Соты:** регрессия **dry-run** + **`forward-npc-handoff`** и **preflight** — [cells-migration-workflow.md](../backend/docs/cells-migration-workflow.md); операции **§7–8** — [cold-cell-split.md](../backend/runbooks/cold-cell-split.md). **Live-handoff игроков** — вне scope; при окнах — drain/handoff по runbook. [**`run-forward-npc-handoff.sh`**](../backend/scripts/run-forward-npc-handoff.sh) (`MODE=incluster`).
-4. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN=1`** на cell-node **точечно** (отладка тика); реимпорт дашборда **uid `mmo-grid-rpc-p95`** — [observability/README.md](../backend/deploy/observability/README.md), JSON — [`grafana-dashboard-grid-rpc-p95-by-method.json`](../backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json).
-5. **Web3 / BET:** утвердить whitepaper и очередность внедрения по [crypto-economy.md](crypto-economy.md) §2 (контракты → индексация/БД → релей → API/Unity).
+1. **Unity / WebGL:** e2e WebGL на реальном билде — [webgl-staging-e2e.md](webgl-staging-e2e.md) и **шаг 8** снимка; при желании — полировка prediction (**`MmoGameBootstrap`** / сеть). WS: [`MmoWebSocket.jslib`](../Unity/Assets/Plugins/WebGL/MmoWebSocket.jslib), **`MmoWorldStreamClient`**, **`Poll()`**; HTTP WebGL — **`UnityWebRequest`** (`MmoGatewayClient.WebGL.cs`).
+2. **Postgres / баланс:** выкатить миграцию **`20260429120000`** — [deploy-staging.sh](../backend/scripts/deploy-staging.sh), затем **`/readyz`**, [staging-verify.sh](../backend/scripts/staging-verify.sh); дальше — новые миграции в [`internal/db/migrations/`](../backend/internal/db/migrations/) ([ci-and-deploy.md](../backend/docs/ci-and-deploy.md)), при необходимости **`make load-smoke`** и расширение [backend-ci.yml](../.github/workflows/backend-ci.yml).
+3. **Observability:** **`MMO_CELL_OTEL_TICK_SPAN=1`** на cell-node **точечно** (отладка тика); реимпорт дашборда **uid `mmo-grid-rpc-p95`** — [observability/README.md](../backend/deploy/observability/README.md), JSON — [`grafana-dashboard-grid-rpc-p95-by-method.json`](../backend/deploy/observability/grafana-dashboard-grid-rpc-p95-by-method.json).
+4. **Web3 / BET:** утвердить whitepaper и очередность внедрения по [crypto-economy.md](crypto-economy.md) §2 (контракты → индексация/БД → релей → API/Unity).
 
 **Эпик B3 — cold-path (первый проход выполнен, март 2026):**
 
-Инструменты и процедура в репозитории; на staging проверены родитель + дочерняя сота (`cell_0_0_0` и `cell_-1_-1_1`), resolve в SW-квадранте. Полный «только дети» (убрать родителя из каталога) — по [runbook](../backend/runbooks/cold-cell-split.md), не автотест.
+Инструменты и процедура в репозитории; на staging — родитель + дочерняя сота (`cell_0_0_0`, `cell_-1_-1_1`), resolve в SW-квадранте, **`migration-dry-run`**, **`forward-npc-handoff`**, preflight в [**`cells-migration-workflow.md`**](../backend/docs/cells-migration-workflow.md). План сплита, подъём детей и B2-трафик — закрыты (см. снимок). Полный «только дети» (§5) — по [runbook](../backend/runbooks/cold-cell-split.md), не автотест.
 
 | Шаг | Статус | Действие |
 |-----|--------|----------|
-| План | Сделано | `mmoctl plansplit` / **`mmoctl partition-plan`**; [`internal/partition`](../backend/internal/partition); сверка с `cell_instances`. |
-| Подъём детей | Сделано | OpenTofu + Redis `mmo:cell:{child_id}:state` (пустой мир или вручную). |
-| Трафик | Сделано | `Resolve` отдаёт ребёнка в покрытых квадрантах при большем `level` — B2 + смоук. |
 | Игроки | Частичный UX в gateway | Автоперенос сессии без реконнекта **нет**; есть **`resolve-preview`** и метрики/заголовки при расхождении last_cell с resolve — runbook: простой или реконнект. |
 | Вывод родителя | Операция по runbook | Graceful shutdown → deregister; убрать из `cell_instances` при необходимости. |
-| Вне полного auto-handoff | MVP в runbook §6 | Экспорт (**`export-npc-persist`**, **`npc_export_json`**) и импорт на дочерней соте (**`import-npc-persist`**, путь или stdin через **`mmoctl`**); без ручного копирования в Redis при пустом мире; redirect игрока в gateway — нет. |
+| NPC handoff | MVP, §6–7 | **`ForwardNpcHandoff`**, экспорт/импорт NPC — [runbook §6–7](../backend/runbooks/cold-cell-split.md); операторский цикл — [**`cells-migration-workflow.md`**](../backend/docs/cells-migration-workflow.md). Redirect игрока в gateway — нет. |
 
 ---
 
