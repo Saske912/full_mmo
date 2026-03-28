@@ -1,33 +1,40 @@
-# WebGL: проверка против staging
+# WebGL: проверка против staging (HTTPS + WSS)
 
-Краткий чеклист для билда **WebGL** с доступом к gateway по **https** и мировому сокету по **wss** (тот же хост, что в [`MmoGatewayClient.BuildWebSocketUri`](../Unity/Assets/MMO/Runtime/MmoGatewayClient.cs)).
+Краткий чеклист **e2e** клиента Unity на **WebGL** с gateway **`https://mmo.pass-k8s.ru`** (или другой URL из Ingress). Соответствует шагу 8 снимка в [roadmap-checklist.md](roadmap-checklist.md).
 
-## Сборка
+## 1. Настройки билда
 
-1. В Unity: **File → Build Settings → WebGL → Switch Platform**.
-2. **Player Settings:** для запросов к API разрешите домен staging (если используете ограничения Unity) или тестовый хостинг с тем же origin-политикой, что и у страницы с игрой.
-3. Соберите билд и разместите на **HTTPS** (статический хост или локальный dev-server с TLS). Смешанный контент (**http**-страница → **wss**) браузер обычно блокирует.
+- **Build Settings:** платформа **WebGL**, **Compression** по возможности **Brotli** (хост должен отдавать корректные `Content-Type` / заголовки, как требует Unity).
+- В сцене **MmoPlayground** у **MmoGameBootstrap** поле базового URL (**`_defaultBaseUrl`**) = **`https://mmo.pass-k8s.ru`** (уже дефолт в репозитории) или ваш стенд.
+- Транспорт мира: **`MmoWorldStreamClient`** при `UNITY_WEBGL` → **`MmoWebSocket.jslib`**, **`Poll()`** вызывается из **`Update`** (см. `MmoGameBootstrap`).
 
-## Параметры Playground (`MmoGameBootstrap`)
+## 2. Хостинг билда
 
-- **Адрес gateway:** например `https://mmo.pass-k8s.ru` (как в снимке [roadmap-checklist.md](roadmap-checklist.md)).
-- **player_id:** уникальный на время теста.
-- **resolve_x / resolve_z:** `0,0` или координаты дочерней соты (например `-500,-500` для child-sw), согласованные с каталогом.
+- Страница открывается по **HTTPS** (браузер блокирует небезопасный контекст и смешанный контент).
+- WebSocket к gateway должен быть **wss://** (клиент строит URL от той же схемы, что и REST — при `https://` получится **wss**).
 
-## Сценарий e2e
+## 3. Ручная проверка (smoke)
 
-1. Открыть игру в браузере, консоль **DevTools** (вкладка Console / Network).
-2. **Подключиться к миру** — без ошибок CORS/TLS; в Network виден upgrade **`/v1/ws`** (**wss**).
-3. Проверить **WASD**, отображение меты (золото, инвентарь, квесты).
-4. **Инвентарь:** клик по строке → поле «Предмет (удалить)» → **Удалить 1 шт.** — мета обновляется после успешного запроса.
-5. **409 / handoff:** при смене соты — реконнект по сценарию из [cold-cell-split runbook](../backend/runbooks/cold-cell-split.md) и полей **last_cell** на bootstrap.
+1. Открыть билд в браузере, консоль разработчика (**F12**).
+2. Старт сцены: сессия (**POST** session), мета (инвентарь, квесты).
+3. **Подключиться к миру** — WS без ошибок в консоли.
+4. **WASD** — движение; при обрыве сети — ожидаемое поведение реконнекта (см. handoff в [cold-cell-split.md](../backend/runbooks/cold-cell-split.md)).
 
-## Типичные проблемы
+## 4. Типичные проблемы
 
-- **WebSocket failed:** проверить, что базовый URL — **https**, не **http**; что хост не режет длинные query с `token`.
-- **HTTP к REST:** на WebGL используется **`MmoGatewayClient.WebGL.cs`** (**UnityWebRequest**). При несовместимости с версией Unity сверить с веткой **Http** в Editor.
+| Симптом | Что проверить |
+|--------|----------------|
+| CORS / блокировка запросов | Gateway и Ingress должны разрешать origin вашего хоста статики (если API на другом домене — CORS на gateway). |
+| WS не поднимается | **wss**, корректный путь **`/v1/ws`**, таймауты Ingress (в Terraform уже увеличены proxy-read/send timeout). |
+| HTTP из WebGL падает, в Editor ок | В WebGL **`HttpClient`** недоступен; используется **`UnityWebRequest`** в **`MmoGatewayClient.WebGL.cs`** — сверить версию Unity и логи. |
+| SSL | Доверенный сертификат на gateway; для самоподписанного локального стенда браузер должен доверять цепочке. |
+
+## 5. Полировка UX (опционально)
+
+- **Инвентарь:** клик по строке в Playground → удаление предмета (сценарий в чеклисте).
+- **Движение:** при необходимости добавить **prediction** на клиенте (отдельная задача; сервер по-прежнему авторитетен).
 
 ## См. также
 
-- Ручные шаги в разделе «Клиент Playground» в [roadmap-checklist.md](roadmap-checklist.md).
-- Деплой backend: [ci-and-deploy.md](../backend/docs/ci-and-deploy.md).
+- [roadmap-checklist.md](roadmap-checklist.md) — клиент Playground, шаги 1–8.
+- [backend/docs/ci-and-deploy.md](../backend/docs/ci-and-deploy.md) — выкат сервера и `staging-verify`.
