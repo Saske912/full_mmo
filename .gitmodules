@@ -1,0 +1,8 @@
+[submodule "Unity"]
+	path = Unity
+	url = git@github.com:Saske912/Unity.git
+	branch = main
+[submodule "backend"]
+	path = backend
+	url = git@github.com:Saske912/mmo.git
+	branch = main

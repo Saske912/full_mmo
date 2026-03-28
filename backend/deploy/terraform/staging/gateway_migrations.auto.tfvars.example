@@ -1,5 +1,0 @@
-# В репозитории закоммичен gateway_migrations.auto.tfvars для staging.
-# Для другого кластера скопируйте этот файл и подключите как *.auto.tfvars.
-# deploy-staging.sh автоматически вызывает goose-migrate-job.sh, если найдено gateway_skip_db_migrations = true.
-
-gateway_skip_db_migrations = true
