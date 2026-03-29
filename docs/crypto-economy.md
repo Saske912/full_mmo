@@ -4,7 +4,13 @@
 
 Ниже — тезисное описание криптоэкономики (как спроектировано) и чеклист внедрения.
 
-**Навигация:** [README.md](README.md) · [roadmap-checklist.md](roadmap-checklist.md)
+**Навигация:** [README.md](README.md) · [roadmap-checklist.md](roadmap-checklist.md) · **[bet-whitepaper-v0.md](bet-whitepaper-v0.md)** · [web3-implementation-tracker.md](web3-implementation-tracker.md)
+
+---
+
+## Whitepaper v0 (март 2026)
+
+Продуктовая формулировка токена BET, NFT, burn и **очередности фаз A–H** зафиксирована в **[bet-whitepaper-v0.md](bet-whitepaper-v0.md)**. Ниже в §2 остаются **инженерные чеклисты** и детализация; нумерация §2.1–2.5 не менялась.
 
 ---
 
@@ -253,8 +259,9 @@ NFT бывают:
   – открытые зоны / контент  
   – топ‑контрибьюторы
 
-- [ ] **Whitepaper / токеномика**  
-  – чётко: зачем нужен токен, как работает сжигание, что можно купить, а что нельзя
+- [x] **Whitepaper / токеномика (v0 в репозитории)**  
+  – черновик: [bet-whitepaper-v0.md](bet-whitepaper-v0.md) + §1–3 этого документа  
+  – далее: юридический sign-off, затем **v1** перед публичным оффером / листингом
 
 - [ ] **Политика форков**  
   – открытый core, закрытые контракты  
